@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rustls = { version = "0.23", features = ["ring"] }
+axum = "0.8"
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+tokio = { version = "1", features = ["full"] }
 rcgen = "0.13"
 time = "0.3"
