@@ -5,12 +5,132 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>homenodeai</title>
     <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 4rem auto; color: #333; }
-        h1 { color: #1a1a2e; }
+        body { font-family: sans-serif; max-width: 400px; margin: 4rem auto; color: #333; padding: 0 1rem; }
+        h1   { color: #1a1a2e; }
+        input, button { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #ccc; font-size: 1rem; }
+        button { cursor: pointer; background: #1a1a2e; color: white; border: none; }
+        button:hover { background: #2a2a4e; }
+        #status { margin-top: 1rem; padding: 10px; border-radius: 6px; display: none; }
+        .success { background: #d4edda; color: #155724; }
+        .error   { background: #f8d7da; color: #721c24; }
     </style>
 </head>
 <body>
     <h1>homenodeai</h1>
     <p>Server is running.</p>
+    <hr>
+    <h2>Passkey Login</h2>
+    <input type="text" id="username" placeholder="Username" autocomplete="username" />
+    <button onclick="register()">🔑 Register Passkey</button>
+    <button onclick="login()">✅ Login with Passkey</button>
+    <div id="status"></div>
+
+    <script>
+    // ── Base64url helpers ────────────────────────────────────────────────────
+    const b64uToBuf = b =>
+        Uint8Array.from(atob(b.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0)).buffer;
+
+    const bufToB64u = buf =>
+        btoa(String.fromCharCode(...new Uint8Array(buf)))
+            .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+
+    function showStatus(msg, ok) {
+        const el = document.getElementById('status');
+        el.textContent = msg;
+        el.className = ok ? 'success' : 'error';
+        el.style.display = 'block';
+    }
+
+    // ── Registration ─────────────────────────────────────────────────────────
+    async function register() {
+        const username = document.getElementById('username').value.trim();
+        if (!username) return showStatus('Please enter a username.', false);
+        try {
+            const res  = await fetch('/auth/register/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username})
+            });
+            const opts = await res.json();
+
+            opts.publicKey.challenge = b64uToBuf(opts.publicKey.challenge);
+            opts.publicKey.user.id   = b64uToBuf(opts.publicKey.user.id);
+            if (opts.publicKey.excludeCredentials) {
+                opts.publicKey.excludeCredentials =
+                    opts.publicKey.excludeCredentials.map(c => ({...c, id: b64uToBuf(c.id)}));
+            }
+
+            const cred = await navigator.credentials.create(opts);
+
+            const finish = await fetch('/auth/register/finish', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    username,
+                    credential: {
+                        id:    cred.id,
+                        rawId: bufToB64u(cred.rawId),
+                        type:  cred.type,
+                        response: {
+                            clientDataJSON:    bufToB64u(cred.response.clientDataJSON),
+                            attestationObject: bufToB64u(cred.response.attestationObject),
+                            transports: cred.response.getTransports?.() ?? [],
+                        }
+                    }
+                })
+            });
+            const result = await finish.json();
+            showStatus(result.message, result.success);
+        } catch (e) {
+            showStatus(e.message || 'Registration failed', false);
+        }
+    }
+
+    // ── Authentication ───────────────────────────────────────────────────────
+    async function login() {
+        const username = document.getElementById('username').value.trim();
+        if (!username) return showStatus('Please enter a username.', false);
+        try {
+            const res  = await fetch('/auth/login/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username})
+            });
+            const opts = await res.json();
+
+            opts.publicKey.challenge = b64uToBuf(opts.publicKey.challenge);
+            if (opts.publicKey.allowCredentials) {
+                opts.publicKey.allowCredentials =
+                    opts.publicKey.allowCredentials.map(c => ({...c, id: b64uToBuf(c.id)}));
+            }
+
+            const cred = await navigator.credentials.get(opts);
+
+            const finish = await fetch('/auth/login/finish', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    username,
+                    credential: {
+                        id:    cred.id,
+                        rawId: bufToB64u(cred.rawId),
+                        type:  cred.type,
+                        response: {
+                            clientDataJSON:    bufToB64u(cred.response.clientDataJSON),
+                            authenticatorData: bufToB64u(cred.response.authenticatorData),
+                            signature:         bufToB64u(cred.response.signature),
+                            userHandle: cred.response.userHandle
+                                ? bufToB64u(cred.response.userHandle) : null,
+                        }
+                    }
+                })
+            });
+            const result = await finish.json();
+            showStatus(result.message, result.success);
+        } catch (e) {
+            showStatus(e.message || 'Login failed', false);
+        }
+    }
+    </script>
 </body>
 </html>

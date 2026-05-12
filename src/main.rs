@@ -1,13 +1,15 @@
 use axum::{
     Router,
-    routing::get,
+    routing::{get, post},
     response::{Html, IntoResponse},
     http::StatusCode,
 };
 use axum_server::tls_rustls::RustlsConfig;
-use rcgen::{CertificateParams, KeyPair};
+use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use time::{Duration, OffsetDateTime};
 use std::fs;
+
+mod auth;
 
 const ADDR: &str = "[::]:443";
 const HTML_FILE: &str = "index.html";
@@ -15,11 +17,17 @@ const CERT_VALIDITY_DAYS: i64 = 365;
 
 #[tokio::main]
 async fn main() {
-    let tls = tls_config().await;
+    let tls   = tls_config().await;
+    let state = auth::AppState::new();
 
     let app = Router::new()
-        .route("/", get(index))
-        .route("/health", get(health));
+        .route("/",                     get(index))
+        .route("/health",               get(health))
+        .route("/auth/register/start",  post(auth::register_start))
+        .route("/auth/register/finish", post(auth::register_finish))
+        .route("/auth/login/start",     post(auth::login_start))
+        .route("/auth/login/finish",    post(auth::login_finish))
+        .with_state(state);
 
     println!("Listening on https://{ADDR}");
 
@@ -49,8 +57,12 @@ async fn tls_config() -> RustlsConfig {
     ])
     .expect("Failed to create certificate params");
 
+    let mut dn = DistinguishedName::new();
+    dn.push(DnType::CommonName,       "Stephan Zehrer");
+    dn.push(DnType::OrganizationName, "homenodes.io");
+    params.distinguished_name = dn;
     params.not_before = OffsetDateTime::now_utc();
-    params.not_after = OffsetDateTime::now_utc() + Duration::days(CERT_VALIDITY_DAYS);
+    params.not_after  = OffsetDateTime::now_utc() + Duration::days(CERT_VALIDITY_DAYS);
 
     let cert = params.self_signed(&key_pair).expect("Failed to sign certificate");
 
