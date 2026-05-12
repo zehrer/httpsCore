@@ -3,26 +3,35 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::fs;
 
-use rcgen::generate_simple_self_signed;
+use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::{ServerConnection, StreamOwned};
+use time::{Duration, OffsetDateTime};
 
 const ADDR: &str = "[::]:443";
 const HTML_FILE: &str = "index.html";
+const CERT_VALIDITY_DAYS: i64 = 365;
 
 fn tls_config() -> Arc<ServerConfig> {
-    let certified = generate_simple_self_signed(vec!["localhost".to_string()])
-        .expect("Failed to generate certificate");
+    let key_pair = KeyPair::generate().expect("Failed to generate key pair");
 
-    let cert = CertificateDer::from(certified.cert.der().to_vec());
-    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-        certified.key_pair.serialize_der(),
-    ));
+    let mut params = CertificateParams::new(vec!["localhost".to_string()])
+        .expect("Failed to create certificate params");
+    params.distinguished_name = DistinguishedName::new();
+    params.not_before = OffsetDateTime::now_utc();
+    params.not_after = OffsetDateTime::now_utc() + Duration::days(CERT_VALIDITY_DAYS);
+
+    let cert = params.self_signed(&key_pair).expect("Failed to generate certificate");
+
+    let cert_der = CertificateDer::from(cert.der().to_vec());
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_pair.serialize_der()));
+
+    println!("TLS certificate valid for {CERT_VALIDITY_DAYS} days");
 
     let config = ServerConfig::builder()
         .with_no_client_auth()
-        .with_single_cert(vec![cert], key)
+        .with_single_cert(vec![cert_der], key)
         .expect("Invalid certificate or key");
 
     Arc::new(config)
